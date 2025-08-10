@@ -211,3 +211,115 @@ def compress_schema(
         )
 
     return schema
+
+
+def dereference_schema(schema: dict) -> dict:
+    """
+    Remove all $ref references from a JSON schema by replacing them with their definitions.
+
+    This creates a self-contained schema with all references expanded inline.
+    The resulting schema will not have any $ref or $defs sections.
+
+    Args:
+        schema: JSON schema dict that may contain $ref and $defs
+
+    Returns:
+        A new schema dict with all references resolved and no $ref/$defs
+
+    Example:
+        >>> schema = {
+        ...     "type": "object",
+        ...     "properties": {
+        ...         "user": {"$ref": "#/$defs/User"}
+        ...     },
+        ...     "$defs": {
+        ...         "User": {
+        ...             "type": "object",
+        ...             "properties": {"name": {"type": "string"}}
+        ...         }
+        ...     }
+        ... }
+        >>> result = dereference_schema(schema)
+        >>> # Result has user property expanded inline, no $ref or $defs
+    """
+
+    def resolve_refs(
+        node: object, defs: dict | None, visited_refs: set[str] | None = None
+    ) -> object:
+        """Recursively resolve all $ref references in a node."""
+        if visited_refs is None:
+            visited_refs = set()
+
+        if isinstance(node, dict):
+            # Check if this is a $ref
+            if "$ref" in node and isinstance(node["$ref"], str):
+                ref = node["$ref"]
+
+                # Prevent infinite recursion on circular references
+                if ref in visited_refs:
+                    # Return a copy without the $ref to break the cycle
+                    result = {k: v for k, v in node.items() if k != "$ref"}
+                    return resolve_refs(result, defs, visited_refs)
+
+                # Handle local references to $defs
+                if ref.startswith("#/$defs/") and defs:
+                    def_name = ref.split("/")[-1]
+                    if def_name in defs:
+                        # Track this reference to prevent cycles
+                        new_visited = visited_refs | {ref}
+                        # Recursively resolve the definition itself
+                        resolved = resolve_refs(defs[def_name], defs, new_visited)
+                        # Merge any additional properties from the $ref node
+                        if len(node) > 1:
+                            # If there are other properties besides $ref, merge them
+                            result = (
+                                dict(resolved)
+                                if isinstance(resolved, dict)
+                                else resolved
+                            )
+                            if isinstance(result, dict):
+                                for k, v in node.items():
+                                    if k != "$ref":
+                                        result[k] = v
+                            return result
+                        return resolved
+
+                # If we couldn't resolve the ref, remove it but keep other properties
+                return {
+                    k: resolve_refs(v, defs, visited_refs)
+                    for k, v in node.items()
+                    if k != "$ref"
+                }
+
+            # Recursively process all values in the dict
+            result = {}
+            for k, v in node.items():
+                if k == "$defs":
+                    # Skip $defs at the root level - we'll remove it
+                    continue
+                result[k] = resolve_refs(v, defs, visited_refs)
+            return result
+
+        elif isinstance(node, list):
+            return [resolve_refs(item, defs, visited_refs) for item in node]
+
+        else:
+            # Primitive value, return as-is
+            return node
+
+    # Extract definitions if they exist
+    defs = schema.get("$defs", {})
+
+    # First pass: resolve all references within definitions themselves
+    if defs:
+        resolved_defs = {}
+        for def_name, def_schema in defs.items():
+            resolved_defs[def_name] = resolve_refs(def_schema, defs)
+        defs = resolved_defs
+
+    # Second pass: resolve all references in the main schema
+    result = resolve_refs(schema, defs)
+
+    # Type assertion - we know the result is a dict since the input schema is a dict
+    assert isinstance(result, dict)
+    return result

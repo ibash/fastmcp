@@ -21,7 +21,7 @@ from pydantic import Field, PydanticSchemaGenerationError
 
 from fastmcp.server.dependencies import get_context
 from fastmcp.utilities.components import FastMCPComponent
-from fastmcp.utilities.json_schema import compress_schema
+from fastmcp.utilities.json_schema import compress_schema, dereference_schema
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import (
     Audio,
@@ -389,6 +389,7 @@ class ParsedFunction:
         input_type_adapter = get_cached_typeadapter(fn)
         input_schema = input_type_adapter.json_schema()
         input_schema = compress_schema(input_schema, prune_params=prune_params)
+        input_schema = dereference_schema(input_schema)
 
         output_schema = None
         # Get the return annotation from the signature

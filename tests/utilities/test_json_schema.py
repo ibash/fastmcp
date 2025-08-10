@@ -1,6 +1,7 @@
 from fastmcp.utilities.json_schema import (
     _prune_param,
     compress_schema,
+    dereference_schema,
 )
 
 # Wrapper for backward compatibility with tests
